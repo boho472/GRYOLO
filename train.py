@@ -9,5 +9,5 @@ model.train(
     batch=16,
     name="jay_adam_face",
     patience=10,  # stops early if no improvement
-    device="mps"
+    device="cuda"
 )
