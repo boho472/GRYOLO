@@ -1,4 +1,5 @@
 import torch
+torch.cuda.empty_cache()
 from ultralytics import YOLO
 
 def main():
@@ -7,22 +8,22 @@ def main():
     print("GPU:", torch.cuda.get_device_name(0))
 
     # Load model
-    model = YOLO("yolo11n.pt")
+    model = YOLO("yolo11s.pt")
 
     # Train
     model.train(
         data="faces.yaml",
-        epochs=50,
-        imgsz=640,
+        epochs=100,
+        imgsz=960,
 
         # GPU settings
-        batch=32,
+        batch=16,
         device=0,
         workers=8,
         amp=True,
 
         # Training settings
-        patience=10,
+        patience=20,
         cos_lr=True,
         optimizer="AdamW",
 
@@ -31,7 +32,7 @@ def main():
         hsv_s=0.7,
         hsv_v=0.4,
         translate=0.1,
-        scale=0.5,
+        scale=0.8,
         fliplr=0.5,
 
         # Output
