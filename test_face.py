@@ -1,7 +1,7 @@
 from ultralytics import YOLO
 import cv2
 
-face_model = YOLO("runs/detect/jay_adam_face2/weights/best.pt")
+face_model = YOLO("runs/detect/runs/train/jay_adam_face-29/weights/best.pt")
 pose_model = YOLO("yolo11n-pose.pt")
 
 cap = cv2.VideoCapture(0)
