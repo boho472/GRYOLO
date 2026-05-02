@@ -7,18 +7,22 @@ import json
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 
+import matplotlib.pyplot as plt # so i can see how its predicting attention across the frames, not necessary for training
+
 # folder where gesture npy files are saved from gesture_collect.py
 DATA_DIR = "gesture_data"
 
 # where to save the trained model and label mapping after training
-MODEL_SAVE_PATH = "gesture_model.pt"
-LABELS_SAVE_PATH = "gesture_labels.json"
+# MODEL_SAVE_PATH = "gesture_model.pt"
+# LABELS_SAVE_PATH = "gesture_labels.json"
+MODEL_SAVE_PATH = "gesture_model_NOISES.pt"
+LABELS_SAVE_PATH = "gesture_labels_NOISES.json"
 
 # list of gestures we are training on, must match what was collected
 GESTURES = ["Jay_fist", "Jay_open_palm", "Jay_point", "Jay_thumbs_up", "Jay_wave"]
 
 # how many times the model sees all the training data
-EPOCHS = 160
+EPOCHS = 360
 
 # how many samples to process at once during training
 BATCH_SIZE = 32
@@ -35,21 +39,36 @@ TEST_SPLIT = 0.2
 INPUT_SIZE = 42
 
 # internal size the transformer works with, all layers use this dimension
-D_MODEL = 128
+D_MODEL = 128 # tested 256 and it works better than 128
 
 # number of attention heads, each head looks at the sequence differently
 # D_MODEL must be divisible by N_HEADS so 128 divided by 8 works
-N_HEADS = 8 # double it to match me double D_model
+N_HEADS = 4  # double it to match me double D_model
 
 # how many transformer encoder layers to stack
 N_LAYERS = 3
 
 # size of the feedforward network inside each transformer layer
-D_FF = 512 # OG at 128, testing 512
+D_FF = 512 #og 128 now testing 2048 to got with 
 
 # dropout randomly turns off neurons during training to prevent memorization
 DROPOUT = 0.1
 
+# data augmentation adds variety to the training data so the model learns more general patterns and doesn't just memorize the samples it sees
+def augment(sequence):
+    # small random noise
+    sequence = sequence + np.random.normal(0, 0.01, sequence.shape)
+
+    # slight scaling
+    scale = np.random.uniform(0.9, 1.1)
+    sequence = sequence * scale
+
+    # optional: slight time shift
+    if np.random.rand() > 0.5:
+        shift = np.random.randint(-2, 3)
+        sequence = np.roll(sequence, shift, axis=0)
+
+    return sequence
 
 # NORMALIZATION
 # we want the model to focus on the hand pose, not where the hand is in the
@@ -140,31 +159,41 @@ class GestureTransformer(nn.Module):
             nn.Linear(32, num_classes)
         )
 
-    def forward(self, x):
+    def forward(self, x, return_attention=False):
         # x comes in as batch of sequences, shape is batch x 30 frames x 42 coords
         x = self.input_projection(x)    # expand to 64 dims
         x = self.pos_encoding(x)        # add position info
         x = self.transformer(x)         # self attention across all 30 frames
-        weights = self.attn_pool(x)      # (batch, seq_len, 1)
-        x = (x * weights).sum(dim=1)     # weighted sum of frames, shape is now batch x 64
-        x = self.classifier(x)          # predict which gesture it is
-        return x
+        weights = self.attn_pool(x)          # (batch, seq_len, 1)
+        pooled = (x * weights).sum(dim=1)
+
+        out = self.classifier(pooled)
+
+        if return_attention:
+            return out, weights.squeeze(-1)  # shape: (batch, seq_len)
+
+        return out
 
 
 # DATASET
 # wraps numpy arrays into pytorch format so the dataloader can use them
 
 class GestureDataset(Dataset):
-    def __init__(self, X, y):
-        self.X = torch.FloatTensor(X)
-        self.y = torch.LongTensor(y)
-        
+    def __init__(self, X, y, augment=False):   # ✅ accept augment
+        self.X = X
+        self.y = y
+        self.augment = augment
 
     def __len__(self):
         return len(self.X)
 
     def __getitem__(self, idx):
-        return self.X[idx], self.y[idx]
+        x = self.X[idx]
+
+        if self.augment:
+            x = augment(x)   # apply augmentation dynamically
+
+        return torch.FloatTensor(x), torch.LongTensor([self.y[idx]])[0]
 
 
 def load_data():
@@ -245,6 +274,27 @@ def train(model, train_loader, val_loader, device):
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             torch.save(model.state_dict(), MODEL_SAVE_PATH)
+            
+        if ((epoch % 20 == 0) and (epoch < EPOCHS - 20)):  # every 20 epochs
+            with torch.no_grad():
+                for X_batch, y_batch in val_loader:
+                    X_batch = X_batch.to(device)
+
+                    outputs, attn = model(X_batch, return_attention=True)
+
+                    attn = attn[0].detach().cpu().numpy()
+
+                    print("Attention:", attn)
+                    print("Sum:", attn.sum())
+
+                    # # 🔥 PLOT IT
+                    # plt.plot(attn)
+                    # plt.title("Attention over frames")
+                    # plt.xlabel("Frame")
+                    # plt.ylabel("Attention weight")
+                    # plt.show()
+
+                    break
 
     print(f"\nBest validation accuracy: {best_val_acc:.1f}%")
     print(f"Model saved to: {MODEL_SAVE_PATH}")
@@ -269,11 +319,13 @@ def main():
     # split into 80 percent training and 20 percent validation
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=TEST_SPLIT, random_state=42, stratify=y
-    )
+    )   
+    
+   
 
-    train_loader = DataLoader(GestureDataset(X_train, y_train),
+    train_loader = DataLoader(GestureDataset(X_train, y_train, augment=True ),
                               batch_size=BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(GestureDataset(X_val, y_val),
+    val_loader = DataLoader(GestureDataset(X_val, y_val, augment=False),
                             batch_size=BATCH_SIZE)
 
     # build the transformer model with the config settings defined at the top
@@ -292,6 +344,9 @@ def main():
 
     train(model, train_loader, val_loader, device)
     print("\nDone. Run gesture_inference.py to test live.")
+    model.eval()
 
+    
 if __name__ == "__main__":
     main()
+    
