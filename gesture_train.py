@@ -45,11 +45,27 @@ N_HEADS = 8 # double it to match me double D_model
 N_LAYERS = 3
 
 # size of the feedforward network inside each transformer layer
-D_FF = 128
+D_FF = 512 # OG at 128, testing 512
 
 # dropout randomly turns off neurons during training to prevent memorization
 DROPOUT = 0.1
 
+
+# NORMALIZATION
+# we want the model to focus on the hand pose, not where the hand is in the
+def normalize_landmarks(sequence):
+    # sequence: (frames, 42)
+    sequence = sequence.reshape(sequence.shape[0], 21, 2)
+
+    # center on wrist (landmark 0)
+    wrist = sequence[:, 0:1, :]
+    sequence = sequence - wrist
+
+    # scale by hand size (distance wrist -> middle finger tip)
+    scale = np.linalg.norm(sequence[:, 12, :], axis=1, keepdims=True) + 1e-6
+    sequence = sequence / scale[:, None, :]
+
+    return sequence.reshape(sequence.shape[0], 42)
 
 # POSITIONAL ENCODING
 # transformer has no built in sense of order so we add position information
@@ -58,6 +74,8 @@ DROPOUT = 0.1
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=30, dropout=0.1):
         super().__init__()
+        
+        
         self.dropout = nn.Dropout(dropout)
 
         # create a matrix of position signals using sine and cosine waves
@@ -86,6 +104,8 @@ class GestureTransformer(nn.Module):
     def __init__(self, input_size, d_model, n_heads, n_layers, d_ff,
                  num_classes, dropout=0.1):
         super().__init__()
+        
+        
 
         # step 1: convert 42 input features to 64 dimensions the transformer expects
         self.input_projection = nn.Linear(input_size, d_model)
@@ -106,6 +126,11 @@ class GestureTransformer(nn.Module):
             encoder_layer,
             num_layers=n_layers
         )
+        
+        self.attn_pool = nn.Sequential(
+            nn.Linear(d_model, 1),
+            nn.Softmax(dim=1)
+        )
 
         # step 4: classification head that outputs a probability for each gesture
         self.classifier = nn.Sequential(
@@ -120,7 +145,8 @@ class GestureTransformer(nn.Module):
         x = self.input_projection(x)    # expand to 64 dims
         x = self.pos_encoding(x)        # add position info
         x = self.transformer(x)         # self attention across all 30 frames
-        x = x.mean(dim=1)              # average all frames into one summary vector
+        weights = self.attn_pool(x)      # (batch, seq_len, 1)
+        x = (x * weights).sum(dim=1)     # weighted sum of frames, shape is now batch x 64
         x = self.classifier(x)          # predict which gesture it is
         return x
 
@@ -132,6 +158,7 @@ class GestureDataset(Dataset):
     def __init__(self, X, y):
         self.X = torch.FloatTensor(X)
         self.y = torch.LongTensor(y)
+        
 
     def __len__(self):
         return len(self.X)
@@ -151,6 +178,7 @@ def load_data():
             print(f"  Missing: {path} skipping")
             continue
         data = np.load(path)
+        data = np.array([normalize_landmarks(seq) for seq in data])
         all_X.append(data)
         # assign the same label number to every sample of this gesture
         all_y.append(np.full(len(data), label_idx))
