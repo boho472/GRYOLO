@@ -17,7 +17,7 @@ def main():
         imgsz=960,
 
         # GPU settings
-        batch=16,
+        batch=8,
         device=0,
         workers=8,
         amp=True,
@@ -37,7 +37,7 @@ def main():
 
         # Output
         project="runs/train",
-        name="jay_adam_face",
+        name="jay_adam_Aditya_face",
         save=True,
         verbose=True
     )
