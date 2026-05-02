@@ -24,7 +24,9 @@ EPOCHS = 160
 BATCH_SIZE = 32
 
 # how fast the model learns, smaller means slower but more stable
-LEARNING_RATE = 0.001
+LEARNING_RATE = 0.0008 # tested it on Adam desktop
+# 0.0008 is best so far,
+# this works best over 0.001 and it gets low Accuracy and under 0.00001 and it gets bad again too
 
 # 20 percent of data is used for validation to check accuracy
 TEST_SPLIT = 0.2
@@ -33,11 +35,11 @@ TEST_SPLIT = 0.2
 INPUT_SIZE = 42
 
 # internal size the transformer works with, all layers use this dimension
-D_MODEL = 64
+D_MODEL = 128
 
 # number of attention heads, each head looks at the sequence differently
-# D_MODEL must be divisible by N_HEADS so 64 divided by 4 works
-N_HEADS = 4
+# D_MODEL must be divisible by N_HEADS so 128 divided by 8 works
+N_HEADS = 8 # double it to match me double D_model
 
 # how many transformer encoder layers to stack
 N_LAYERS = 3
