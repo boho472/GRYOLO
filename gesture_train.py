@@ -18,13 +18,13 @@ LABELS_SAVE_PATH = "gesture_labels.json"
 GESTURES = ["Jay_fist", "Jay_open_palm", "Jay_point", "Jay_thumbs_up", "Jay_wave"]
 
 # how many times the model sees all the training data
-EPOCHS = 80
+EPOCHS = 160
 
 # how many samples to process at once during training
 BATCH_SIZE = 32
 
 # how fast the model learns, smaller means slower but more stable
-LEARNING_RATE = 0.0001
+LEARNING_RATE = 0.001
 
 # 20 percent of data is used for validation to check accuracy
 TEST_SPLIT = 0.2
