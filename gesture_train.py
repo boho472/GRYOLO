@@ -15,7 +15,7 @@ MODEL_SAVE_PATH = "gesture_model.pt"
 LABELS_SAVE_PATH = "gesture_labels.json"
 
 # list of gestures we are training on, must match what was collected
-GESTURES = ["wave", "fist", "point", "thumbs_up", "open_palm"]
+GESTURES = ["Jay_fist", "Jay_open_palm", "Jay_point", "Jay_thumbs_up", "Jay_wave"]
 
 # how many times the model sees all the training data
 EPOCHS = 80
