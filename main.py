@@ -241,7 +241,6 @@ def draw_label_box(frame, text, x, y, color=(0, 255, 0)):
     cv2.putText(frame, text, (x + 4, y),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
 
-
 def draw_hud(frame, identity, gesture, conf, action, fps):
     h, w = frame.shape[:2]
     cv2.rectangle(frame, (0, 0), (w, 60), (20, 20, 20), -1)
