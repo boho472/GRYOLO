@@ -7,6 +7,7 @@ import json
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 
+<<<<<<< HEAD
 import matplotlib.pyplot as plt # so i can see how its predicting attention across the frames, not necessary for training
 
 # folder where gesture npy files are saved from gesture_collect.py
@@ -53,6 +54,29 @@ D_FF = 512 #og 128 now testing 2048 to got with
 
 # dropout randomly turns off neurons during training to prevent memorization
 DROPOUT = 0.1
+=======
+# ── CONFIG ────────────────────────────────────────────────────────────────────
+DATA_DIR        = "gesture_data"
+MODEL_SAVE_PATH = "gesture_model.pt"
+LABELS_SAVE_PATH = "gesture_labels.json"
+
+# Gesture classes — order matters, index = class ID
+GESTURES = ["wave", "fist", "point", "thumbs_up", "open_palm"]
+
+# People — add names here as more people collect data
+PEOPLE = ["Jay", "Adam", "Aditya"]
+
+EPOCHS         = 80
+BATCH_SIZE     = 16       # safe for small datasets (200 samples), fine for large ones too
+LEARNING_RATE  = 0.0001
+TEST_SPLIT     = 0.2
+INPUT_SIZE     = 42       # 21 landmarks x 2 (x, y)
+D_MODEL        = 64
+N_HEADS        = 4
+N_LAYERS       = 3
+D_FF           = 128
+DROPOUT        = 0.1
+>>>>>>> jay-local
 
 # data augmentation adds variety to the training data so the model learns more general patterns and doesn't just memorize the samples it sees
 def augment(sequence):
@@ -86,54 +110,42 @@ def normalize_landmarks(sequence):
 
     return sequence.reshape(sequence.shape[0], 42)
 
-# POSITIONAL ENCODING
-# transformer has no built in sense of order so we add position information
-# each frame gets a unique signal so the model knows frame 1 comes before frame 2
-
+# ── POSITIONAL ENCODING ───────────────────────────────────────────────────────
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=30, dropout=0.1):
         super().__init__()
         
         
         self.dropout = nn.Dropout(dropout)
-
-        # create a matrix of position signals using sine and cosine waves
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len).unsqueeze(1).float()
         div_term = torch.exp(
             torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)
         )
-        # even positions use sine, odd positions use cosine
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0)
         self.register_buffer('pe', pe)
 
     def forward(self, x):
-        # add position signal to each frame in the sequence
         x = x + self.pe[:, :x.size(1), :]
         return self.dropout(x)
 
 
-# TRANSFORMER MODEL
-# takes 30 frames of hand landmarks and classifies which gesture it is
-# uses self attention to figure out which frames matter most for each gesture
-
+# ── TRANSFORMER MODEL ─────────────────────────────────────────────────────────
 class GestureTransformer(nn.Module):
     def __init__(self, input_size, d_model, n_heads, n_layers, d_ff,
                  num_classes, dropout=0.1):
         super().__init__()
+<<<<<<< HEAD
         
         
 
         # step 1: convert 42 input features to 64 dimensions the transformer expects
+=======
+>>>>>>> jay-local
         self.input_projection = nn.Linear(input_size, d_model)
-
-        # step 2: add positional encoding so model knows frame order
         self.pos_encoding = PositionalEncoding(d_model, dropout=dropout)
-
-        # step 3: stack transformer encoder layers
-        # each layer uses self attention to compare all frames against each other
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
             nhead=n_heads,
@@ -141,6 +153,7 @@ class GestureTransformer(nn.Module):
             dropout=dropout,
             batch_first=True
         )
+<<<<<<< HEAD
         self.transformer = nn.TransformerEncoder(
             encoder_layer,
             num_layers=n_layers
@@ -152,6 +165,9 @@ class GestureTransformer(nn.Module):
         )
 
         # step 4: classification head that outputs a probability for each gesture
+=======
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+>>>>>>> jay-local
         self.classifier = nn.Sequential(
             nn.Linear(d_model, 32),
             nn.ReLU(),
@@ -159,6 +175,7 @@ class GestureTransformer(nn.Module):
             nn.Linear(32, num_classes)
         )
 
+<<<<<<< HEAD
     def forward(self, x, return_attention=False):
         # x comes in as batch of sequences, shape is batch x 30 frames x 42 coords
         x = self.input_projection(x)    # expand to 64 dims
@@ -173,11 +190,18 @@ class GestureTransformer(nn.Module):
             return out, weights.squeeze(-1)  # shape: (batch, seq_len)
 
         return out
+=======
+    def forward(self, x):
+        x = self.input_projection(x)
+        x = self.pos_encoding(x)
+        x = self.transformer(x)
+        x = x.mean(dim=1)
+        x = self.classifier(x)
+        return x
+>>>>>>> jay-local
 
 
-# DATASET
-# wraps numpy arrays into pytorch format so the dataloader can use them
-
+# ── DATASET ───────────────────────────────────────────────────────────────────
 class GestureDataset(Dataset):
     def __init__(self, X, y, augment=False):   # ✅ accept augment
         self.X = X
@@ -196,38 +220,74 @@ class GestureDataset(Dataset):
         return torch.FloatTensor(x), torch.LongTensor([self.y[idx]])[0]
 
 
+# ── DATA LOADER ───────────────────────────────────────────────────────────────
 def load_data():
-    # loads all gesture npy files and combines them into one dataset
+    """
+    Loads gesture data from two file naming conventions:
+
+    Per-person files (new format — recommended):
+        gesture_data/Jay_fist.npy
+        gesture_data/Adam_fist.npy
+        gesture_data/Aditya_fist.npy
+
+    Legacy shared files (old format — still supported):
+        gesture_data/fist.npy
+
+    All files for the same gesture are merged into one dataset.
+    Gesture label = gesture name (filename), not person name.
+    """
     all_X, all_y, label_names = [], [], []
     print("\nLoading gesture data...")
 
     for label_idx, gesture in enumerate(GESTURES):
-        path = os.path.join(DATA_DIR, f"{gesture}.npy")
-        if not os.path.exists(path):
-            print(f"  Missing: {path} skipping")
+        gesture_samples = []
+
+        # Per-person files
+        for person in PEOPLE:
+            path = os.path.join(DATA_DIR, f"{person}_{gesture}.npy")
+            if os.path.exists(path):
+                data = np.load(path)
+                gesture_samples.append(data)
+                print(f"  {person}_{gesture}: {len(data)} samples")
+
+        # Legacy shared file
+        legacy_path = os.path.join(DATA_DIR, f"{gesture}.npy")
+        if os.path.exists(legacy_path):
+            data = np.load(legacy_path)
+            gesture_samples.append(data)
+            print(f"  {gesture} (shared): {len(data)} samples")
+
+        if not gesture_samples:
+            print(f"  {gesture}: no data found — skipping")
             continue
+<<<<<<< HEAD
         data = np.load(path)
         data = np.array([normalize_landmarks(seq) for seq in data])
         all_X.append(data)
         # assign the same label number to every sample of this gesture
         all_y.append(np.full(len(data), label_idx))
+=======
+
+        merged = np.concatenate(gesture_samples, axis=0)
+        all_X.append(merged)
+        all_y.append(np.full(len(merged), label_idx))
+>>>>>>> jay-local
         label_names.append(gesture)
-        print(f"  {gesture}: {len(data)} samples")
+        print(f"  → {gesture} total: {len(merged)} samples")
+
+    if not all_X:
+        raise RuntimeError("No gesture data found in gesture_data/")
 
     X = np.concatenate(all_X, axis=0)
     y = np.concatenate(all_y, axis=0)
-    print(f"\nTotal: {len(X)} samples, {len(label_names)} gestures")
+    print(f"\nTotal: {len(X)} samples across {len(label_names)} gestures")
     return X, y, label_names
 
 
+# ── TRAINING LOOP ─────────────────────────────────────────────────────────────
 def train(model, train_loader, val_loader, device):
-    # crossentropyloss measures how wrong the predictions are
     criterion = nn.CrossEntropyLoss()
-
-    # adam optimizer adjusts the model weights to reduce the loss each epoch
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-
-    # scheduler reduces learning rate every 20 epochs to fine tune the model
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
 
     best_val_acc = 0
@@ -240,21 +300,17 @@ def train(model, train_loader, val_loader, device):
 
         for X_batch, y_batch in train_loader:
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-
-            # clear old gradients, run forward pass, calculate loss, update weights
             optimizer.zero_grad()
             out = model(X_batch)
             loss = criterion(out, y_batch)
             loss.backward()
             optimizer.step()
-
             total_loss += loss.item()
             correct += out.argmax(1).eq(y_batch).sum().item()
             total += y_batch.size(0)
 
         scheduler.step()
 
-        # check accuracy on validation set without updating weights
         model.eval()
         val_correct, val_total = 0, 0
         with torch.no_grad():
@@ -265,12 +321,11 @@ def train(model, train_loader, val_loader, device):
                 val_total += y_batch.size(0)
 
         train_acc = 100 * correct / total
-        val_acc = 100 * val_correct / val_total
-        avg_loss = total_loss / len(train_loader)
+        val_acc   = 100 * val_correct / val_total
+        avg_loss  = total_loss / len(train_loader)
 
         print(f"{epoch+1:>6} | {avg_loss:>8.4f} | {train_acc:>8.1f}% | {val_acc:>6.1f}%")
 
-        # save the model whenever validation accuracy improves
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             torch.save(model.state_dict(), MODEL_SAVE_PATH)
@@ -300,35 +355,44 @@ def train(model, train_loader, val_loader, device):
     print(f"Model saved to: {MODEL_SAVE_PATH}")
 
 
+# ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
-    print("="*50)
+    print("=" * 50)
     print("  GESTURE TRANSFORMER TRAINING")
-    print("="*50)
+    print("=" * 50)
 
-    # use apple gpu on mac, nvidia gpu if available, otherwise cpu
     device = torch.device("mps" if torch.backends.mps.is_available() else
                           "cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
     X, y, label_names = load_data()
 
-    # save label order to json so inference script knows which number means which gesture
+    # Save label order — inference script reads this to map index → gesture name
     with open(LABELS_SAVE_PATH, "w") as f:
         json.dump(label_names, f)
+    print(f"Labels saved: {label_names}")
 
-    # split into 80 percent training and 20 percent validation
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=TEST_SPLIT, random_state=42, stratify=y
+<<<<<<< HEAD
     )   
     
    
+=======
+    )
+    print(f"Train: {len(X_train)} samples | Val: {len(X_val)} samples")
+>>>>>>> jay-local
 
     train_loader = DataLoader(GestureDataset(X_train, y_train, augment=True ),
                               batch_size=BATCH_SIZE, shuffle=True)
+<<<<<<< HEAD
     val_loader = DataLoader(GestureDataset(X_val, y_val, augment=False),
                             batch_size=BATCH_SIZE)
+=======
+    val_loader   = DataLoader(GestureDataset(X_val, y_val),
+                              batch_size=BATCH_SIZE)
+>>>>>>> jay-local
 
-    # build the transformer model with the config settings defined at the top
     model = GestureTransformer(
         input_size=INPUT_SIZE,
         d_model=D_MODEL,
@@ -343,8 +407,13 @@ def main():
     print(f"Model parameters: {total_params:,}")
 
     train(model, train_loader, val_loader, device)
+<<<<<<< HEAD
     print("\nDone. Run gesture_inference.py to test live.")
     model.eval()
+=======
+    print("\nDone. Run main.py to test live.")
+
+>>>>>>> jay-local
 
     
 if __name__ == "__main__":

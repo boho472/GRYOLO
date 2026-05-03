@@ -12,7 +12,7 @@ import time
 GESTURES = ["wave", "fist", "point", "thumbs_up", "open_palm"]
 
 # how many recordings per gesture, needs to be 300 for Transformer to train well
-SAMPLES_PER_GESTURE = 300
+SAMPLES_PER_GESTURE = 100
 
 # how many frames per recording, 30 frames is roughly 1 second of motion
 FRAMES_PER_SAMPLE = 30
@@ -58,7 +58,7 @@ def collect_gesture(gesture_name):
     else:
         all_samples = []
 
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(1)
     sample_count = len(all_samples)
 
     while sample_count < SAMPLES_PER_GESTURE:
