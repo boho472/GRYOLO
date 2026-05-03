@@ -20,6 +20,7 @@ LABELS_SAVE_PATH = "gesture_labels_NOISES.json"
 
 # list of gestures we are training on, must match what was collected
 GESTURES = ["Jay_fist", "Jay_open_palm", "Jay_point", "Jay_thumbs_up", "Jay_wave"]
+PEOPLE   = ["Jay", "Adam", "Aditya"]
 
 # how many times the model sees all the training data
 EPOCHS = 360
@@ -219,6 +220,13 @@ def load_data():
         if not gesture_samples:
             print(f"  {gesture}: no data found — skipping")
             continue
+        merged = np.concatenate(gesture_samples, axis=0)
+        merged = np.array([normalize_landmarks(seq) for seq in merged])
+        all_X.append(merged)
+        all_y.append(np.full(len(merged), label_idx))
+        label_names.append(gesture)
+        print(f"  → {gesture} total: {len(merged)} samples")
+        
         data = np.load(path)
         data = np.array([normalize_landmarks(seq) for seq in data])
         all_X.append(data)
