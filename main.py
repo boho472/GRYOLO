@@ -281,9 +281,9 @@ def main():
         min_tracking_confidence=0.5
     )
 
-    cap = cv2.VideoCapture(1)
+    cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        print("❌ Camera index 1 failed, trying 0...")
+        print("❌ Camera index 0 failed, trying 0...")
         cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("❌ No camera found. Lock your iPhone and try again.")
@@ -329,7 +329,7 @@ def main():
             conf = float(box.conf[0])
             if conf >= FACE_CONFIDENCE_THRESHOLD:
                 cls  = int(box.cls[0])
-                name = face_model.names[cls]
+                name = face_model.names[cls].capitalize()
                 detected_identity = name
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
@@ -345,7 +345,7 @@ def main():
         wrist_points = []
 
         for person in pose_results:
-            if person.keypoints is not None:
+            if person.keypoints is not None and len(person.keypoints.xy) > 0:
                 kps = person.keypoints.xy[0]
                 if len(kps) > RIGHT_WRIST_IDX:
                     for idx in [LEFT_WRIST_IDX, RIGHT_WRIST_IDX]:
