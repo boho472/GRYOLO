@@ -12,8 +12,8 @@ DATA_DIR         = "gesture_data"
 MODEL_SAVE_PATH  = "gesture_model.pt"
 LABELS_SAVE_PATH = "gesture_labels.json"
 
-GESTURES = ["Jay_fist", "Jay_open_palm", "Jay_point", "Jay_thumbs_up", "Jay_wave"]
-PEOPLE   = ["Jay", "Adam", "Aditya"]
+GESTURES = ["fist", "open_palm", "point", "thumbs_up", "wave"]
+PEOPLE   = ["Jay", "Adi"]
 
 EPOCHS        = 360
 BATCH_SIZE    = 16
