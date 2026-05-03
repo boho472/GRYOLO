@@ -356,12 +356,7 @@ def main():
         frame = cv2.addWeighted(frame, 0.4, pose_annotated, 0.6, 0)
 
         # ── 3. MEDIAPIPE HANDS → LANDMARK EXTRACTION ──────────────────────
-        rois = []
-        if wrist_points:
-            for wp in wrist_points:
-                rois.append(get_hand_roi(wp, w_frame, h_frame, roi_size=220))
-        else:
-            rois = [(0, 0, w_frame, h_frame)]   # fallback: full frame
+        rois = [(0, 0, w_frame, h_frame)]
 
         hand_detected_this_frame = False
 
