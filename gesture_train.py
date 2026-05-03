@@ -7,7 +7,6 @@ import json
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 
-<<<<<<< HEAD
 import matplotlib.pyplot as plt # so i can see how its predicting attention across the frames, not necessary for training
 
 # folder where gesture npy files are saved from gesture_collect.py
@@ -54,29 +53,6 @@ D_FF = 512 #og 128 now testing 2048 to got with
 
 # dropout randomly turns off neurons during training to prevent memorization
 DROPOUT = 0.1
-=======
-# ── CONFIG ────────────────────────────────────────────────────────────────────
-DATA_DIR        = "gesture_data"
-MODEL_SAVE_PATH = "gesture_model.pt"
-LABELS_SAVE_PATH = "gesture_labels.json"
-
-# Gesture classes — order matters, index = class ID
-GESTURES = ["wave", "fist", "point", "thumbs_up", "open_palm"]
-
-# People — add names here as more people collect data
-PEOPLE = ["Jay", "Adam", "Aditya"]
-
-EPOCHS         = 80
-BATCH_SIZE     = 16       # safe for small datasets (200 samples), fine for large ones too
-LEARNING_RATE  = 0.0001
-TEST_SPLIT     = 0.2
-INPUT_SIZE     = 42       # 21 landmarks x 2 (x, y)
-D_MODEL        = 64
-N_HEADS        = 4
-N_LAYERS       = 3
-D_FF           = 128
-DROPOUT        = 0.1
->>>>>>> jay-local
 
 # data augmentation adds variety to the training data so the model learns more general patterns and doesn't just memorize the samples it sees
 def augment(sequence):
@@ -137,13 +113,10 @@ class GestureTransformer(nn.Module):
     def __init__(self, input_size, d_model, n_heads, n_layers, d_ff,
                  num_classes, dropout=0.1):
         super().__init__()
-<<<<<<< HEAD
         
         
 
         # step 1: convert 42 input features to 64 dimensions the transformer expects
-=======
->>>>>>> jay-local
         self.input_projection = nn.Linear(input_size, d_model)
         self.pos_encoding = PositionalEncoding(d_model, dropout=dropout)
         encoder_layer = nn.TransformerEncoderLayer(
@@ -153,7 +126,6 @@ class GestureTransformer(nn.Module):
             dropout=dropout,
             batch_first=True
         )
-<<<<<<< HEAD
         self.transformer = nn.TransformerEncoder(
             encoder_layer,
             num_layers=n_layers
@@ -165,9 +137,6 @@ class GestureTransformer(nn.Module):
         )
 
         # step 4: classification head that outputs a probability for each gesture
-=======
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
->>>>>>> jay-local
         self.classifier = nn.Sequential(
             nn.Linear(d_model, 32),
             nn.ReLU(),
@@ -175,7 +144,6 @@ class GestureTransformer(nn.Module):
             nn.Linear(32, num_classes)
         )
 
-<<<<<<< HEAD
     def forward(self, x, return_attention=False):
         # x comes in as batch of sequences, shape is batch x 30 frames x 42 coords
         x = self.input_projection(x)    # expand to 64 dims
@@ -190,15 +158,6 @@ class GestureTransformer(nn.Module):
             return out, weights.squeeze(-1)  # shape: (batch, seq_len)
 
         return out
-=======
-    def forward(self, x):
-        x = self.input_projection(x)
-        x = self.pos_encoding(x)
-        x = self.transformer(x)
-        x = x.mean(dim=1)
-        x = self.classifier(x)
-        return x
->>>>>>> jay-local
 
 
 # ── DATASET ───────────────────────────────────────────────────────────────────
@@ -260,18 +219,11 @@ def load_data():
         if not gesture_samples:
             print(f"  {gesture}: no data found — skipping")
             continue
-<<<<<<< HEAD
         data = np.load(path)
         data = np.array([normalize_landmarks(seq) for seq in data])
         all_X.append(data)
         # assign the same label number to every sample of this gesture
         all_y.append(np.full(len(data), label_idx))
-=======
-
-        merged = np.concatenate(gesture_samples, axis=0)
-        all_X.append(merged)
-        all_y.append(np.full(len(merged), label_idx))
->>>>>>> jay-local
         label_names.append(gesture)
         print(f"  → {gesture} total: {len(merged)} samples")
 
@@ -374,24 +326,14 @@ def main():
 
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=TEST_SPLIT, random_state=42, stratify=y
-<<<<<<< HEAD
     )   
     
    
-=======
-    )
-    print(f"Train: {len(X_train)} samples | Val: {len(X_val)} samples")
->>>>>>> jay-local
 
     train_loader = DataLoader(GestureDataset(X_train, y_train, augment=True ),
                               batch_size=BATCH_SIZE, shuffle=True)
-<<<<<<< HEAD
     val_loader = DataLoader(GestureDataset(X_val, y_val, augment=False),
                             batch_size=BATCH_SIZE)
-=======
-    val_loader   = DataLoader(GestureDataset(X_val, y_val),
-                              batch_size=BATCH_SIZE)
->>>>>>> jay-local
 
     model = GestureTransformer(
         input_size=INPUT_SIZE,
@@ -407,13 +349,8 @@ def main():
     print(f"Model parameters: {total_params:,}")
 
     train(model, train_loader, val_loader, device)
-<<<<<<< HEAD
     print("\nDone. Run gesture_inference.py to test live.")
     model.eval()
-=======
-    print("\nDone. Run main.py to test live.")
-
->>>>>>> jay-local
 
     
 if __name__ == "__main__":
