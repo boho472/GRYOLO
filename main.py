@@ -25,13 +25,13 @@ from collections import deque, Counter
 import time
 
 # ── MODEL PATHS ───────────────────────────────────────────────────────────────
-FACE_MODEL_PATH     = "runs/detect/jay_adam_face2/weights/best.pt"  # swap when 3-person model ready
+FACE_MODEL_PATH     = "runs/detect/runs/train/jay_adam_Aditya_face-2/weights/best.pt"  # swap when 3-person model ready
 POSE_MODEL_PATH     = "yolo11n-pose.pt"
 GESTURE_MODEL_PATH  = "gesture_model.pt"
 GESTURE_LABELS_PATH = "gesture_labels.json"
 
 # ── IDENTITY CONFIG ───────────────────────────────────────────────────────────
-FACE_CONFIDENCE_THRESHOLD = 0.75
+FACE_CONFIDENCE_THRESHOLD = 0.50
 IDENTITY_VOTE_WINDOW      = 10
 UNKNOWN_LABEL             = "Unknown"
 
@@ -42,10 +42,10 @@ GESTURE_CONFIDENCE = 0.70      # minimum softmax prob to accept gesture
 GESTURE_COOLDOWN   = 2.0       # seconds between repeated action triggers
 
 # ── TRANSFORMER CONFIG (must match gesture_train.py exactly) ──────────────────
-D_MODEL  = 64
+D_MODEL  = 128
 N_HEADS  = 4
 N_LAYERS = 3
-D_FF     = 128
+D_FF     = 512
 DROPOUT  = 0.1
 
 # ── WRIST KEYPOINT INDICES (COCO) ─────────────────────────────────────────────
@@ -56,11 +56,11 @@ RIGHT_WRIST_IDX = 10
 # gesture names must match GESTURES list in gesture_collect.py exactly
 USER_PROFILES = {
     "Jay": {
-        "thumbs_up": "lights_on",
-        "open_palm":  "lights_off",
-        "wave":       "volume_up",
-        "fist":       "volume_down",
-        "point":      "play_pause",
+        "Jay_thumbs_up": "lights_on",
+        "Jay_open_palm":  "lights_off",
+        "Jay_wave":       "volume_up",
+        "Jay_fist":       "volume_down",
+        "Jay_point":      "play_pause",
     },
     "Adam": {
         "thumbs_up": "play_pause",
@@ -133,6 +133,13 @@ class GestureTransformer(nn.Module):
             batch_first=True
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+
+        # ← Adam's attention pooling — must match gesture_train.py
+        self.attn_pool = nn.Sequential(
+            nn.Linear(d_model, 1),
+            nn.Softmax(dim=1)
+        )
+
         self.classifier = nn.Sequential(
             nn.Linear(d_model, 32),
             nn.ReLU(),
@@ -140,13 +147,16 @@ class GestureTransformer(nn.Module):
             nn.Linear(32, num_classes)
         )
 
-    def forward(self, x):
+    def forward(self, x, return_attention=False):
         x = self.input_projection(x)
         x = self.pos_encoding(x)
         x = self.transformer(x)
-        x = x.mean(dim=1)
-        x = self.classifier(x)
-        return x
+        weights = self.attn_pool(x)        # (batch, seq_len, 1)
+        pooled  = (x * weights).sum(dim=1) # weighted sum
+        out = self.classifier(pooled)
+        if return_attention:
+            return out, weights.squeeze(-1)
+        return out
 
 
 def load_gesture_model(device):
@@ -180,6 +190,15 @@ def extract_landmarks(hand_landmarks) -> np.ndarray:
     return np.array(coords, dtype=np.float32)
 
 
+def normalize_landmarks(sequence):
+    """Must match gesture_train.py exactly — centers on wrist, scales by hand size."""
+    sequence = sequence.reshape(21, 2)
+    wrist = sequence[0:1, :]
+    sequence = sequence - wrist
+    scale = np.linalg.norm(sequence[12, :]) + 1e-6
+    sequence = sequence / scale
+    return sequence.reshape(42)
+
 # ── GESTURE INFERENCE ─────────────────────────────────────────────────────────
 def infer_gesture(sequence: list, model, labels: list, device) -> tuple:
     """
@@ -189,7 +208,12 @@ def infer_gesture(sequence: list, model, labels: list, device) -> tuple:
     while len(sequence) < FRAMES_PER_SAMPLE:
         sequence.append(np.zeros(INPUT_SIZE, dtype=np.float32))
 
-    x = torch.FloatTensor([sequence[:FRAMES_PER_SAMPLE]]).to(device)  # [1, 30, 42]
+    seq_array = np.array(sequence[:FRAMES_PER_SAMPLE])
+
+    # ← Apply same normalization as gesture_train.py
+    seq_array = np.array([normalize_landmarks(frame) for frame in seq_array])
+
+    x = torch.FloatTensor([seq_array]).to(device)
 
     with torch.no_grad():
         logits = model(x)
@@ -258,6 +282,12 @@ def main():
     )
 
     cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("❌ Camera index 0 failed, trying 0...")
+        cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("❌ No camera found. Lock your iPhone and try again.")
+        return
     print("✅ Pipeline running — press Q to quit\n")
 
     # ── State ─────────────────────────────────────────────────────────────────
@@ -299,7 +329,7 @@ def main():
             conf = float(box.conf[0])
             if conf >= FACE_CONFIDENCE_THRESHOLD:
                 cls  = int(box.cls[0])
-                name = face_model.names[cls]
+                name = face_model.names[cls].capitalize()
                 detected_identity = name
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
@@ -315,7 +345,7 @@ def main():
         wrist_points = []
 
         for person in pose_results:
-            if person.keypoints is not None:
+            if person.keypoints is not None and len(person.keypoints.xy) > 0:
                 kps = person.keypoints.xy[0]
                 if len(kps) > RIGHT_WRIST_IDX:
                     for idx in [LEFT_WRIST_IDX, RIGHT_WRIST_IDX]:
@@ -355,7 +385,8 @@ def main():
                     frame[ry1:ry2, rx1:rx2] = roi_frame
 
                     # Push landmarks into rolling buffer
-                    landmark_buffer.append(extract_landmarks(hand_lm))
+                    raw = extract_landmarks(hand_lm)
+                    landmark_buffer.append(normalize_landmarks(raw))
                     hand_detected_this_frame = True
                     break
 
