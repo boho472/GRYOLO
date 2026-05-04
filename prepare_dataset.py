@@ -4,10 +4,15 @@ import shutil
 import random
 import urllib.request
 
-# ── CONFIG ──────────────────────────────────────────────
-CLASSES = {"Jface": 0, "Aface": 1}
-SPLIT_RATIO = 0.8  # 80% train, 20% val
-# ────────────────────────────────────────────────────────
+# ── CONFIG ────────────────────────────────────────────────────────────────────
+# Map each person's full-frame folder to their class ID
+CLASSES = {
+    "Jayface_full":    0,
+    "Adamface_full":   1,
+    "Adityaface_full": 2,
+}
+SPLIT_RATIO = 0.8
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Download DNN face detector if not present
 if not os.path.exists("deploy.prototxt"):
@@ -36,13 +41,11 @@ def detect_face(image_path):
     blob = cv2.dnn.blobFromImage(img, 1.0, (300, 300), (104, 177, 123))
     net.setInput(blob)
     detections = net.forward()
-
     for i in range(detections.shape[2]):
         confidence = detections[0, 0, i, 2]
         if confidence > 0.6:
             box = detections[0, 0, i, 3:7] * [w, h, w, h]
             x1, y1, x2, y2 = box.astype(int)
-            # Convert to YOLO format (normalized cx, cy, w, h)
             cx = ((x1 + x2) / 2) / w
             cy = ((y1 + y2) / 2) / h
             bw = (x2 - x1) / w
@@ -50,17 +53,21 @@ def detect_face(image_path):
             return img, (cx, cy, bw, bh)
     return img, None
 
-total_saved = 0
+total_saved   = 0
 total_skipped = 0
 
 for folder, class_id in CLASSES.items():
+    if not os.path.exists(folder):
+        print(f"⚠ Folder not found: {folder} — skipping")
+        continue
+
     images = [f for f in os.listdir(folder) if f.endswith(".jpg")]
     random.shuffle(images)
 
     split_idx = int(len(images) * SPLIT_RATIO)
     splits = {"train": images[:split_idx], "val": images[split_idx:]}
 
-    print(f"\nProcessing {folder} (class {class_id})...")
+    print(f"\nProcessing {folder} (class {class_id}) — {len(images)} images...")
 
     for split, files in splits.items():
         for fname in files:
@@ -71,11 +78,11 @@ for folder, class_id in CLASSES.items():
                 total_skipped += 1
                 continue
 
-            # Save image
+            # Save clean image
             dest_img = f"dataset/images/{split}/{folder}_{fname}"
             shutil.copy(src_path, dest_img)
 
-            # Save YOLO annotation
+            # Save YOLO annotation (.txt)
             dest_label = f"dataset/labels/{split}/{folder}_{fname.replace('.jpg', '.txt')}"
             with open(dest_label, "w") as f:
                 cx, cy, bw, bh = bbox
@@ -85,12 +92,11 @@ for folder, class_id in CLASSES.items():
 
 # Write faces.yaml
 with open("faces.yaml", "w") as f:
-    f.write(f"""path: dataset
+    f.write("""path: dataset
 train: images/train
 val: images/val
-
-nc: 2
-names: ['Jay', 'Adam']
+nc: 3
+names: ["jay", "adam", "aditya"]
 """)
 
 print(f"\n✅ Done!")

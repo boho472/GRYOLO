@@ -5,9 +5,9 @@ import urllib.request
 import json
 
 # ── CONFIG ──────────────────────────────────────────────
-SAVE_FOLDER = "Adityaface"
+SAVE_FOLDER  = "Jayface"   # ← change to "Jayface" / "Adamface" / "Adityaface"
 TARGET_COUNT = 1500
-INTERVAL = 0.3
+INTERVAL     = 0.3
 # ────────────────────────────────────────────────────────
 
 PHASES = [
@@ -59,11 +59,10 @@ if not os.path.exists("deploy.prototxt"):
 net = cv2.dnn.readNetFromCaffe("deploy.prototxt", "face.caffemodel")
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 
-# Separate folder for full frames (YOLO trains on these)
 FULL_FRAME_FOLDER = f"{SAVE_FOLDER}_full"
 os.makedirs(FULL_FRAME_FOLDER, exist_ok=True)
 
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(1)
 
 count = load_progress()
 if count > 0:
@@ -75,7 +74,7 @@ print("Controls: SPACE = start/pause | Q = save & quit")
 
 last_capture_time = 0
 started = False
-paused = False
+paused  = False
 
 while True:
     ret, frame = cap.read()
@@ -97,23 +96,46 @@ while True:
             x1, y1, x2, y2 = box.astype(int)
             faces.append((x1, y1, x2 - x1, y2 - y1))
 
-    # Draw face box
+    # ── Auto-capture — save CLEAN frame BEFORE any drawing ───────────────────
+    if started and not paused and len(faces) > 0 and count < TARGET_COUNT:
+        now = time.time()
+        if now - last_capture_time >= INTERVAL:
+            x, y, w, h = faces[0]
+            pad = int(max(w, h) * 0.2)
+            x1 = max(0, x - pad)
+            y1 = max(0, y - pad)
+            x2 = min(w_frame, x + w + pad)
+            y2 = min(h_frame, y + h + pad)
+
+            # Save BEFORE drawing — no green box in saved files
+            clean_frame = frame.copy()
+            face_crop   = clean_frame[y1:y2, x1:x2]
+
+            crop_filename = os.path.join(SAVE_FOLDER,
+                            f"{SAVE_FOLDER}_{count:04d}.jpg")
+            cv2.imwrite(crop_filename, face_crop)
+
+            full_filename = os.path.join(FULL_FRAME_FOLDER,
+                            f"{SAVE_FOLDER}_full_{count:04d}.jpg")
+            cv2.imwrite(full_filename, clean_frame)
+
+            count += 1
+            last_capture_time = now
+            print(f"  {get_phase_label(count)} — saved {count}")
+            save_progress(count)
+
+    # ── Draw UI overlays AFTER saving ────────────────────────────────────────
     color = (0, 255, 0) if (started and not paused) else (100, 100, 100)
     for (x, y, w, h) in faces:
         cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
-
-        # Show confidence hint
-        conf_text = f"Face detected"
-        cv2.putText(frame, conf_text, (x, y - 8),
+        cv2.putText(frame, "Face detected", (x, y - 8),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
-    # No face warning
     if len(faces) == 0 and started and not paused:
-        cv2.putText(frame, "⚠ No face detected — reposition",
+        cv2.putText(frame, "No face detected — reposition",
                     (10, h_frame // 2), cv2.FONT_HERSHEY_SIMPLEX,
                     0.7, (0, 0, 255), 2)
 
-    # Status overlays
     cv2.putText(frame, f"Captured: {count}/{TARGET_COUNT}",
                 (10, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
     cv2.putText(frame, get_phase_label(count),
@@ -138,7 +160,6 @@ while True:
     cv2.rectangle(frame, (10, h_frame - 20), (10 + bar_w, h_frame - 10),
                   (0, 255, 0), -1)
 
-    # Phase markers on progress bar
     for start, end, _ in PHASES:
         marker_x = 10 + int((start / TARGET_COUNT) * (w_frame - 20))
         cv2.line(frame, (marker_x, h_frame - 22),
@@ -164,33 +185,6 @@ while True:
         save_progress(count)
         print(f"💾 Saved at {count}/{TARGET_COUNT}. Run again to resume.")
         break
-
-    # Auto-capture — saves BOTH cropped face AND full frame
-    if started and not paused and len(faces) > 0 and count < TARGET_COUNT:
-        now = time.time()
-        if now - last_capture_time >= INTERVAL:
-            x, y, w, h = faces[0]
-
-            # 1. Save cropped face (with padding)
-            pad = int(max(w, h) * 0.2)
-            x1 = max(0, x - pad)
-            y1 = max(0, y - pad)
-            x2 = min(w_frame, x + w + pad)
-            y2 = min(h_frame, y + h + pad)
-            face_crop = frame[y1:y2, x1:x2]
-            crop_filename = os.path.join(SAVE_FOLDER,
-                            f"{SAVE_FOLDER}_{count:04d}.jpg")
-            cv2.imwrite(crop_filename, face_crop)
-
-            # 2. Save full frame (YOLO sees full spatial context)
-            full_filename = os.path.join(FULL_FRAME_FOLDER,
-                            f"{SAVE_FOLDER}_full_{count:04d}.jpg")
-            cv2.imwrite(full_filename, frame)
-
-            count += 1
-            last_capture_time = now
-            print(f"  {get_phase_label(count)} — saved {count}")
-            save_progress(count)
 
     if count >= TARGET_COUNT:
         save_progress(count)
