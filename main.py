@@ -25,14 +25,14 @@ from collections import deque, Counter
 import time
 
 # ── MODEL PATHS ───────────────────────────────────────────────────────────────
-FACE_MODEL_PATH     = "runs/detect/runs/train/jay_adam_Aditya_face-2/weights/best.pt"  # swap when 3-person model ready
+FACE_MODEL_PATH     = "runs/detect/runs/train/jay_adam_Aditya_face-3/weights/best.pt"  # swap when 3-person model ready
 POSE_MODEL_PATH     = "yolo11n-pose.pt"
 GESTURE_MODEL_PATH  = "gesture_model.pt"
 GESTURE_LABELS_PATH = "gesture_labels.json"
 
 # ── IDENTITY CONFIG ───────────────────────────────────────────────────────────
-FACE_CONFIDENCE_THRESHOLD = 0.50
-IDENTITY_VOTE_WINDOW      = 10
+FACE_CONFIDENCE_THRESHOLD = 0.80
+IDENTITY_VOTE_WINDOW      = 30
 UNKNOWN_LABEL             = "Unknown"
 
 # ── GESTURE CONFIG ────────────────────────────────────────────────────────────
@@ -77,6 +77,8 @@ USER_PROFILES = {
         "point":      "volume_down",
     },
 }
+
+identity_lock_counter = 0
 
 # ── IoT ACTION DISPATCHER (mocked — replace with real Pi calls) ───────────────
 def dispatch_action(user: str, gesture: str, action: str):
@@ -280,7 +282,7 @@ def main():
         min_tracking_confidence=0.5
     )
 
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(1)
     if not cap.isOpened():
         print("❌ Camera index 0 failed, trying 0...")
         cap = cv2.VideoCapture(0)
@@ -336,8 +338,18 @@ def main():
 
         identity_votes.append(detected_identity)
         vote_result = Counter(identity_votes).most_common(1)[0]
-        if vote_result[1] >= IDENTITY_VOTE_WINDOW // 2:
-            current_identity = vote_result[0]
+        new_identity = vote_result[0]
+
+        # Only switch identity if new person detected consistently
+        if new_identity == current_identity:
+            identity_lock_counter = 0
+        elif new_identity != UNKNOWN_LABEL:
+            identity_lock_counter += 1
+            if identity_lock_counter >= 20:  # 20 frames before switching
+                current_identity = new_identity
+                identity_lock_counter = 0
+        else:
+            identity_lock_counter = 0
 
         # ── 2. POSE ESTIMATION → WRIST KEYPOINTS ──────────────────────────
         pose_results = pose_model(frame, verbose=False)
