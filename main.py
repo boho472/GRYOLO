@@ -56,11 +56,11 @@ RIGHT_WRIST_IDX = 10
 # gesture names must match GESTURES list in gesture_collect.py exactly
 USER_PROFILES = {
     "Jay": {
-        "Jay_thumbs_up": "lights_on",
-        "Jay_open_palm":  "lights_off",
-        "Jay_wave":       "volume_up",
-        "Jay_fist":       "volume_down",
-        "Jay_point":      "play_pause",
+        "thumbs_up": "lights_on",
+        "open_palm":  "lights_off",
+        "wave":       "volume_up",
+        "fist":       "volume_down",
+        "point":      "play_pause",
     },
     "Adam": {
         "thumbs_up": "play_pause",
@@ -356,12 +356,7 @@ def main():
         frame = cv2.addWeighted(frame, 0.4, pose_annotated, 0.6, 0)
 
         # ── 3. MEDIAPIPE HANDS → LANDMARK EXTRACTION ──────────────────────
-        rois = []
-        if wrist_points:
-            for wp in wrist_points:
-                rois.append(get_hand_roi(wp, w_frame, h_frame, roi_size=220))
-        else:
-            rois = [(0, 0, w_frame, h_frame)]   # fallback: full frame
+        rois = [(0, 0, w_frame, h_frame)]
 
         hand_detected_this_frame = False
 
