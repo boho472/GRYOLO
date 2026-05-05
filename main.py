@@ -24,6 +24,8 @@ from ultralytics import YOLO
 from collections import deque, Counter
 import time
 
+identity_lock_counter = 0
+
 # ── MODEL PATHS ───────────────────────────────────────────────────────────────
 FACE_MODEL_PATH     = "runs/detect/runs/train/jay_adam_Aditya_face-3/weights/best.pt"  # swap when 3-person model ready
 POSE_MODEL_PATH     = "yolo11n-pose.pt"
@@ -77,8 +79,6 @@ USER_PROFILES = {
         "point":      "volume_down",
     },
 }
-
-identity_lock_counter = 0
 
 # ── IoT ACTION DISPATCHER (mocked — replace with real Pi calls) ───────────────
 def dispatch_action(user: str, gesture: str, action: str):
