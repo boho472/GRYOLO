@@ -26,8 +26,6 @@ from ultralytics import YOLO
 from collections import deque, Counter
 import time
 
-identity_lock_counter = 0
-
 # ── MODEL PATHS ───────────────────────────────────────────────────────────────
 FACE_MODEL_PATH     = "runs/detect/runs/train/jay_adam_Aditya_face-3/weights/best.pt"
 POSE_MODEL_PATH     = "yolo11n-pose.pt"
@@ -35,8 +33,9 @@ GESTURE_MODEL_PATH  = "gesture_model.pt"
 GESTURE_LABELS_PATH = "gesture_labels.json"
 
 # ── IDENTITY CONFIG ───────────────────────────────────────────────────────────
-FACE_CONFIDENCE_THRESHOLD = 0.60
-IDENTITY_VOTE_WINDOW      = 30
+FACE_CONFIDENCE_THRESHOLD = 0.80
+IDENTITY_VOTE_WINDOW      = 30   # frames to vote over
+IDENTITY_LOCK_FRAMES      = 20   # consecutive frames before switching identity
 UNKNOWN_LABEL             = "Unknown"
 
 # ── GESTURE CONFIG ────────────────────────────────────────────────────────────
@@ -52,18 +51,14 @@ N_LAYERS = 3
 D_FF     = 512
 DROPOUT  = 0.1
 
-# ── WRIST KEYPOINT INDICES (COCO) ─────────────────────────────────────────────
-LEFT_WRIST_IDX  = 9
-RIGHT_WRIST_IDX = 10
-
 # ── PER-USER ACTION PROFILES ──────────────────────────────────────────────────
 USER_PROFILES = {
     "Jay": {
-        "Jay_thumbs_up": "lights_on",
-        "Jay_open_palm":  "lights_off",
-        "Jay_wave":       "volume_up",
-        "Jay_fist":       "volume_down",
-        "Jay_point":      "play_pause",
+        "thumbs_up": "lights_on",
+        "open_palm":  "lights_off",
+        "wave":       "volume_up",
+        "fist":       "volume_down",
+        "point":      "play_pause",
     },
     "Adam": {
         "thumbs_up": "play_pause",
@@ -150,6 +145,7 @@ def dispatch_action(user: str, gesture: str, action: str):
     elif action == "lights_off":
         print("         🌑 Lights OFF (would call Pi here)")
 
+
 # ── TRANSFORMER MODEL ─────────────────────────────────────────────────────────
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=30, dropout=0.1):
@@ -177,22 +173,14 @@ class GestureTransformer(nn.Module):
         self.input_projection = nn.Linear(input_size, d_model)
         self.pos_encoding = PositionalEncoding(d_model, dropout=dropout)
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=n_heads,
-            dim_feedforward=d_ff,
-            dropout=dropout,
-            batch_first=True
+            d_model=d_model, nhead=n_heads, dim_feedforward=d_ff,
+            dropout=dropout, batch_first=True
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
-        self.attn_pool = nn.Sequential(
-            nn.Linear(d_model, 1),
-            nn.Softmax(dim=1)
-        )
+        self.attn_pool = nn.Sequential(nn.Linear(d_model, 1), nn.Softmax(dim=1))
         self.classifier = nn.Sequential(
-            nn.Linear(d_model, 32),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(32, num_classes)
+            nn.Linear(d_model, 32), nn.ReLU(),
+            nn.Dropout(dropout), nn.Linear(32, num_classes)
         )
 
     def forward(self, x, return_attention=False):
@@ -210,17 +198,10 @@ class GestureTransformer(nn.Module):
 def load_gesture_model(device):
     with open(GESTURE_LABELS_PATH, "r") as f:
         labels = json.load(f)
-
     model = GestureTransformer(
-        input_size=INPUT_SIZE,
-        d_model=D_MODEL,
-        n_heads=N_HEADS,
-        n_layers=N_LAYERS,
-        d_ff=D_FF,
-        num_classes=len(labels),
-        dropout=DROPOUT
+        input_size=INPUT_SIZE, d_model=D_MODEL, n_heads=N_HEADS,
+        n_layers=N_LAYERS, d_ff=D_FF, num_classes=len(labels), dropout=DROPOUT
     ).to(device)
-
     model.load_state_dict(torch.load(GESTURE_MODEL_PATH, map_location=device))
     model.eval()
     print(f"✅ Gesture model loaded — classes: {labels}")
@@ -249,16 +230,13 @@ def normalize_landmarks(sequence):
 def infer_gesture(sequence: list, model, labels: list, device) -> tuple:
     while len(sequence) < FRAMES_PER_SAMPLE:
         sequence.append(np.zeros(INPUT_SIZE, dtype=np.float32))
-
     seq_array = np.array(sequence[:FRAMES_PER_SAMPLE])
     seq_array = np.array([normalize_landmarks(frame) for frame in seq_array])
     x = torch.FloatTensor(seq_array).unsqueeze(0).to(device)
-
     with torch.no_grad():
         logits = model(x)
         probs  = torch.softmax(logits, dim=1)[0]
         conf, idx = probs.max(dim=0)
-
     return labels[idx.item()], conf.item()
 
 
@@ -266,8 +244,7 @@ def infer_gesture(sequence: list, model, labels: list, device) -> tuple:
 def draw_label_box(frame, text, x, y, color=(0, 255, 0)):
     (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
     cv2.rectangle(frame, (x, y - th - 8), (x + tw + 8, y + 4), color, -1)
-    cv2.putText(frame, text, (x + 4, y),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+    cv2.putText(frame, text, (x + 4, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
 
 
 def draw_hud(frame, identity, gesture, conf, action, fps):
@@ -292,8 +269,8 @@ def main():
     print(f"Device: {device}")
     print("Loading models...")
 
-    face_model = YOLO(FACE_MODEL_PATH)
-    pose_model = YOLO(POSE_MODEL_PATH)
+    face_model    = YOLO(FACE_MODEL_PATH)
+    pose_model    = YOLO(POSE_MODEL_PATH)
     gesture_model, gesture_labels = load_gesture_model(device)
 
     mp_hands   = mp.solutions.hands
@@ -305,7 +282,7 @@ def main():
         min_tracking_confidence=0.5
     )
 
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(1)
     if not cap.isOpened():
         cap = cv2.VideoCapture(1)
     if not cap.isOpened():
@@ -313,14 +290,15 @@ def main():
         return
     print("✅ Pipeline running — press Q to quit\n")
 
-    # ── State ─────────────────────────────────────────────────────────────────
-    identity_votes   = deque(maxlen=IDENTITY_VOTE_WINDOW)
-    current_identity = UNKNOWN_LABEL
-    current_gesture  = "NONE"
-    current_conf     = 0.0
-    last_action      = None
-    last_action_time = {}
-    landmark_buffers = {}
+    # ── State (all local to main — no globals) ────────────────────────────────
+    identity_votes        = deque(maxlen=IDENTITY_VOTE_WINDOW)
+    current_identity      = UNKNOWN_LABEL
+    identity_lock_counter = 0          # ← local, accumulates correctly
+    current_gesture       = "NONE"
+    current_conf          = 0.0
+    last_action           = None
+    last_action_time      = {}         # per-person cooldown
+    landmark_buffers      = {}         # per-person landmark deque
 
     fps_timer   = time.time()
     fps         = 0.0
@@ -344,94 +322,84 @@ def main():
         # ── 1. FACE IDENTIFICATION ─────────────────────────────────────────
         face_results      = face_model(frame, verbose=False)
         detected_identity = UNKNOWN_LABEL
+        face_centers      = []
 
         for box in face_results[0].boxes:
             conf = float(box.conf[0])
             if conf >= FACE_CONFIDENCE_THRESHOLD:
                 cls  = int(box.cls[0])
                 name = face_model.names[cls].capitalize()
-                detected_identity = name
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
+                detected_identity = name
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 draw_label_box(frame, f"{name} {conf:.0%}", x1, y1 - 5)
+                face_centers.append((name, (x1 + x2) / 2, (y1 + y2) / 2))
 
+        # ── Identity vote + lock ──────────────────────────────────────────
         identity_votes.append(detected_identity)
-        vote_result = Counter(identity_votes).most_common(1)[0]
-        new_identity = vote_result[0]
+        new_identity = Counter(identity_votes).most_common(1)[0][0]
 
         if new_identity == current_identity:
+            # Same person confirmed → reset counter
             identity_lock_counter = 0
         elif new_identity != UNKNOWN_LABEL:
+            # Different person detected → accumulate lock counter
             identity_lock_counter += 1
-            if identity_lock_counter >= 20:
-                current_identity = new_identity
+            if identity_lock_counter >= IDENTITY_LOCK_FRAMES:
+                # Only switch after IDENTITY_LOCK_FRAMES consecutive frames
+                print(f"  Identity switched: {current_identity} → {new_identity}")
+                current_identity      = new_identity
                 identity_lock_counter = 0
+                # Clear old person's gesture buffer on identity switch
+                landmark_buffers.clear()
         else:
+            # Unknown detected → do not switch, just reset counter
             identity_lock_counter = 0
 
         # ── 2. POSE ESTIMATION ────────────────────────────────────────────
-        pose_results = pose_model(frame, verbose=False)
+        pose_results   = pose_model(frame, verbose=False)
         pose_annotated = pose_results[0].plot(conf=False, labels=False)
         frame = cv2.addWeighted(frame, 0.4, pose_annotated, 0.6, 0)
 
-        # ── 3. MEDIAPIPE HANDS → LANDMARK EXTRACTION ──────────────────────
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # ── 3. MEDIAPIPE HANDS → per-person landmark buffers ──────────────
+        rgb         = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         hand_result = hands.process(rgb)
 
-        def closest_person(wrist_x, wrist_y, face_boxes):
-            best_name = UNKNOWN_LABEL
-            best_dist = float('inf')
-            for name, fx, fy in face_boxes:
-                dist = ((wrist_x - fx)**2 + (wrist_y - fy)**2) ** 0.5
+        def closest_person(wx, wy):
+            """Return the name of the face closest to this wrist position."""
+            best_name, best_dist = UNKNOWN_LABEL, float('inf')
+            for name, fx, fy in face_centers:
+                dist = ((wx - fx) ** 2 + (wy - fy) ** 2) ** 0.5
                 if dist < best_dist:
-                    best_dist = dist
-                    best_name = name
-            return best_name
+                    best_dist, best_name = dist, name
+            # Fall back to current_identity if no face detected this frame
+            return best_name if best_name != UNKNOWN_LABEL else current_identity
 
-        face_centers = []
-        for box in face_results[0].boxes:
-            conf = float(box.conf[0])
-            if conf >= FACE_CONFIDENCE_THRESHOLD:
-                cls = int(box.cls[0])
-                name = face_model.names[cls].capitalize()
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                cx = (x1 + x2) / 2
-                cy = (y1 + y2) / 2
-                face_centers.append((name, cx, cy))
-
-        if hand_result.multi_hand_landmarks and hand_result.multi_handedness:
-            for hand_lm, handedness in zip(
-                hand_result.multi_hand_landmarks,
-                hand_result.multi_handedness
-            ):
+        if hand_result.multi_hand_landmarks:
+            for hand_lm in hand_result.multi_hand_landmarks:
                 mp_drawing.draw_landmarks(
                     frame, hand_lm, mp_hands.HAND_CONNECTIONS,
-                    mp_drawing.DrawingSpec(color=(255, 100, 0),
-                                           thickness=2, circle_radius=3),
+                    mp_drawing.DrawingSpec(color=(255, 100, 0), thickness=2, circle_radius=3),
                     mp_drawing.DrawingSpec(color=(0, 255, 255), thickness=2)
                 )
-
-                wrist = hand_lm.landmark[0]
-                wrist_x = wrist.x * w_frame
-                wrist_y = wrist.y * h_frame
-
-                person = closest_person(wrist_x, wrist_y, face_centers)
-                if person == UNKNOWN_LABEL:
-                    person = current_identity
+                wrist   = hand_lm.landmark[0]
+                wx, wy  = wrist.x * w_frame, wrist.y * h_frame
+                person  = closest_person(wx, wy)
 
                 if person not in landmark_buffers:
                     landmark_buffers[person] = deque(maxlen=FRAMES_PER_SAMPLE)
-
-                raw = extract_landmarks(hand_lm)
-                landmark_buffers[person].append(normalize_landmarks(raw))
-
-        for person in list(landmark_buffers.keys()):
-            if hand_result.multi_hand_landmarks is None:
-                landmark_buffers[person].append(np.zeros(INPUT_SIZE, dtype=np.float32))
+                landmark_buffers[person].append(normalize_landmarks(extract_landmarks(hand_lm)))
+        else:
+            # No hand visible — push zeros for current identity only
+            if current_identity != UNKNOWN_LABEL:
+                if current_identity not in landmark_buffers:
+                    landmark_buffers[current_identity] = deque(maxlen=FRAMES_PER_SAMPLE)
+                landmark_buffers[current_identity].append(
+                    np.zeros(INPUT_SIZE, dtype=np.float32)
+                )
 
         # ── 4. TRANSFORMER GESTURE INFERENCE (per person) ─────────────────
         person_gestures = {}
-
         for person, buf in landmark_buffers.items():
             if len(buf) == FRAMES_PER_SAMPLE:
                 gesture, conf = infer_gesture(
@@ -441,26 +409,24 @@ def main():
                     person_gestures[person] = (gesture, conf)
 
         # ── 5. ACTION DISPATCH ─────────────────────────────────────────────
+        # Only dispatch for current_identity — ignore gestures from others
         current_gesture = "NONE"
         current_conf    = 0.0
 
-        for person, (gesture, conf) in person_gestures.items():
-            if person not in USER_PROFILES:
-                continue
+        if current_identity in person_gestures and current_identity in USER_PROFILES:
+            gesture, conf = person_gestures[current_identity]
+            current_gesture = gesture
+            current_conf    = conf
 
-            current_identity = person
-            current_gesture  = gesture
-            current_conf     = conf
-
-            profile = USER_PROFILES[person]
-            action  = profile.get(gesture)
-            last_fired = last_action_time.get(person, 0)
+            profile    = USER_PROFILES[current_identity]
+            action     = profile.get(gesture)
+            last_fired = last_action_time.get(current_identity, 0)
 
             if action and (now - last_fired) >= GESTURE_COOLDOWN:
-                dispatch_action(person, gesture, action)
-                last_action = action
-                last_action_time[person] = now
-                landmark_buffers[person].clear()  # clear buffer after action fires
+                dispatch_action(current_identity, gesture, action)
+                last_action                          = action
+                last_action_time[current_identity]   = now
+                landmark_buffers[current_identity].clear()
 
         # ── 6. HUD ────────────────────────────────────────────────────────
         draw_hud(frame, current_identity, current_gesture,
