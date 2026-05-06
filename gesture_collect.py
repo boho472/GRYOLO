@@ -20,7 +20,7 @@ FRAMES_PER_SAMPLE = 30
 # folder where all gesture data files will be saved
 SAVE_DIR = "gesture_data"
 AUTO_INTERVAL = 0.15  # ← seconds between auto-captures
-PERSON = "Adam"       # ← change per person
+PERSON = "Adi"       # ← change per person
 
 os.makedirs(SAVE_DIR, exist_ok=True)
 
@@ -57,7 +57,7 @@ def collect_gesture(gesture_name):
     else:
         all_samples = []
 
-    cap = cv2.VideoCapture(1)
+    cap = cv2.VideoCapture(0)
     sample_count = len(all_samples)
     started = False
     last_capture_time = 0
