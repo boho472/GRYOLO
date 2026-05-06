@@ -19,7 +19,7 @@ def main():
         # GPU settings
         batch=8,
         device=0,
-        workers=8,
+        workers=12,
         amp=True,
 
         # Training settings
