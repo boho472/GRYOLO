@@ -27,13 +27,13 @@ from collections import deque, Counter
 import time
 
 # ── MODEL PATHS ───────────────────────────────────────────────────────────────
-FACE_MODEL_PATH     = "runs/detect/runs/train/jay_adam_Aditya_face-3/weights/best.pt"
+FACE_MODEL_PATH     = "runs/detect/runs/train/jay_adam_Aditya_face-4/weights/best.pt"
 POSE_MODEL_PATH     = "yolo11n-pose.pt"
 GESTURE_MODEL_PATH  = "gesture_model.pt"
 GESTURE_LABELS_PATH = "gesture_labels.json"
 
 # ── IDENTITY CONFIG ───────────────────────────────────────────────────────────
-FACE_CONFIDENCE_THRESHOLD = 0.80
+FACE_CONFIDENCE_THRESHOLD = 0.65
 IDENTITY_VOTE_WINDOW      = 30   # frames to vote over
 IDENTITY_LOCK_FRAMES      = 20   # consecutive frames before switching identity
 UNKNOWN_LABEL             = "Unknown"
@@ -54,70 +54,114 @@ DROPOUT  = 0.1
 # ── PER-USER ACTION PROFILES ──────────────────────────────────────────────────
 USER_PROFILES = {
     "Jay": {
-        "thumbs_up": "lights_on",
-        "open_palm":  "lights_off",
+        "thumbs_up": "next_track",
+        "open_palm":  "prev_track",
         "wave":       "volume_up",
         "fist":       "volume_down",
         "point":      "play_pause",
     },
     "Adam": {
         "thumbs_up": "play_pause",
-        "open_palm":  "lights_on",
-        "wave":       "lights_off",
+        "open_palm":  "next_track",
+        "wave":       "prev_track",
         "fist":       "volume_down",
         "point":      "volume_up",
     },
     "Aditya": {
         "thumbs_up": "volume_up",
         "open_palm":  "play_pause",
-        "wave":       "lights_on",
-        "fist":       "lights_off",
+        "wave":       "next_track",
+        "fist":       "prev_track",
         "point":      "volume_down",
     },
 }
 
 # ── IoT ACTION DISPATCHER ─────────────────────────────────────────────────────
 def dispatch_action(user: str, gesture: str, action: str):
+    # print who did what gesture and what action fired with a timestamp
     timestamp = time.strftime("%H:%M:%S")
     print(f"[{timestamp}] {user} → {gesture} → ACTION: {action.upper()}")
 
+    # check if Spotify process is currently running without launching it
     def spotify_running():
+        # pgrep searches all running processes, returns process ID if found, empty if not
         return bool(os.popen("pgrep -x Spotify").read().strip())
 
+    # check if Google Chrome process is currently running
     def chrome_running():
         return bool(os.popen("pgrep -x 'Google Chrome'").read().strip())
 
     if action == "play_pause":
         def smart_play_pause():
+            # only talk to Spotify if it is already open
             if spotify_running():
+                # ask Spotify what its current state is, playing or paused
                 result = os.popen("osascript -e 'tell application \"Spotify\" to player state as string'").read().strip()
                 if result == "playing":
+                    # send Apple Event directly to Spotify to toggle play pause, no focus needed
                     os.system("osascript -e 'tell application \"Spotify\" to playpause'")
-                    print("         ⏯  Spotify Play/Pause")
+                    print("         Spotify Play/Pause")
+                    # stop here, no need to touch Chrome
                     return
+            # if Spotify is not open or not playing, fall through to YouTube
             if chrome_running():
+                # bring Chrome to front briefly so it can receive the keyboard shortcut
                 os.system("osascript -e 'tell application \"Google Chrome\" to activate'")
+                # send spacebar key code 49 to Chrome, which toggles YouTube play pause
                 os.system("osascript -e 'tell application \"System Events\" to key code 49'")
-                print("         ⏯  YouTube Play/Pause")
+                print("         YouTube Play/Pause")
+        # run in background thread so camera loop keeps running without waiting
         threading.Thread(target=smart_play_pause, daemon=True).start()
+
+    elif action == "next_track":
+        def next_t():
+            if spotify_running():
+                # send Apple Event to Spotify to skip to next song, no focus needed
+                os.system("osascript -e 'tell application \"Spotify\" to next track'")
+                print("         Spotify Next Track")
+            elif chrome_running():
+                # activate Chrome then send right arrow key code 124 to seek forward in YouTube
+                os.system("osascript -e 'tell application \"Google Chrome\" to activate'")
+                os.system("osascript -e 'tell application \"System Events\" to key code 124'")
+                print("         YouTube Next (arrow right)")
+        threading.Thread(target=next_t, daemon=True).start()
+
+    elif action == "prev_track":
+        def prev_t():
+            if spotify_running():
+                # send Apple Event to Spotify to go back to previous song
+                os.system("osascript -e 'tell application \"Spotify\" to previous track'")
+                print("         Spotify Previous Track")
+            elif chrome_running():
+                # activate Chrome then send left arrow key code 123 to seek backward in YouTube
+                os.system("osascript -e 'tell application \"Google Chrome\" to activate'")
+                os.system("osascript -e 'tell application \"System Events\" to key code 123'")
+                print("         YouTube Previous (arrow left)")
+        threading.Thread(target=prev_t, daemon=True).start()
 
     elif action == "volume_up":
         def ramp_up():
             if spotify_running():
                 os.system("""osascript -e '
                 tell application "Spotify"
+                    -- get current volume level
                     set currentVol to sound volume
-                    set targetVol to currentVol + 10
+                    -- target is 20 points higher
+                    set targetVol to currentVol + 20
+                    -- cap at 100 so it never goes over max
                     if targetVol > 100 then set targetVol to 100
+                    -- loop one step at a time from current to target
                     repeat with v from (currentVol + 1) to targetVol
                         set sound volume to v
-                        delay 0.02
+                        -- small delay between each step makes it sound smooth
+                        delay 0.01
                     end repeat
                 end tell'""")
-                print("         🔊 Spotify Volume UP")
+                print("         Spotify Volume UP")
             else:
+                # if Spotify is not open, raise Mac system volume instead
                 os.system("osascript -e 'set volume output volume (output volume of (get volume settings) + 10)'")
-                print("         🔊 System Volume UP")
+                print("         System Volume UP")
         threading.Thread(target=ramp_up, daemon=True).start()
 
     elif action == "volume_down":
@@ -125,26 +169,25 @@ def dispatch_action(user: str, gesture: str, action: str):
             if spotify_running():
                 os.system("""osascript -e '
                 tell application "Spotify"
+                    -- get current volume level
                     set currentVol to sound volume
-                    set targetVol to currentVol - 10
+                    -- target is 20 points lower
+                    set targetVol to currentVol - 20
+                    -- floor at 0 so it never goes below minimum
                     if targetVol < 0 then set targetVol to 0
+                    -- loop one step at a time from current down to target
                     repeat with v from (currentVol - 1) to targetVol by -1
                         set sound volume to v
-                        delay 0.02
+                        -- small delay between each step makes it sound smooth
+                        delay 0.01
                     end repeat
                 end tell'""")
-                print("         🔈 Spotify Volume DOWN")
+                print("         Spotify Volume DOWN")
             else:
+                # if Spotify is not open, lower Mac system volume instead
                 os.system("osascript -e 'set volume output volume (output volume of (get volume settings) - 10)'")
-                print("         🔈 System Volume DOWN")
+                print("         System Volume DOWN")
         threading.Thread(target=ramp_down, daemon=True).start()
-
-    elif action == "lights_on":
-        print("         💡 Lights ON (would call Pi here)")
-
-    elif action == "lights_off":
-        print("         🌑 Lights OFF (would call Pi here)")
-
 
 # ── TRANSFORMER MODEL ─────────────────────────────────────────────────────────
 class PositionalEncoding(nn.Module):
@@ -282,7 +325,7 @@ def main():
         min_tracking_confidence=0.5
     )
 
-    cap = cv2.VideoCapture(1)
+    cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         cap = cv2.VideoCapture(1)
     if not cap.isOpened():
@@ -409,11 +452,11 @@ def main():
                     person_gestures[person] = (gesture, conf)
 
         # ── 5. ACTION DISPATCH ─────────────────────────────────────────────
-        # Only dispatch for current_identity — ignore gestures from others
         current_gesture = "NONE"
         current_conf    = 0.0
 
-        if current_identity in person_gestures and current_identity in USER_PROFILES:
+        # only dispatch if hand is actually detected this frame
+        if hand_result.multi_hand_landmarks and current_identity in person_gestures and current_identity in USER_PROFILES:
             gesture, conf = person_gestures[current_identity]
             current_gesture = gesture
             current_conf    = conf
@@ -424,8 +467,8 @@ def main():
 
             if action and (now - last_fired) >= GESTURE_COOLDOWN:
                 dispatch_action(current_identity, gesture, action)
-                last_action                          = action
-                last_action_time[current_identity]   = now
+                last_action                        = action
+                last_action_time[current_identity] = now
                 landmark_buffers[current_identity].clear()
 
         # ── 6. HUD ────────────────────────────────────────────────────────
