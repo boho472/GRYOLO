@@ -19,7 +19,7 @@ LABELS_SAVE_PATH = "gesture_labels.json"
 GESTURES = ["fist", "open_palm", "point", "thumbs_up", "wave"]
 
 # how many times the model sees all the training data
-EPOCHS = 360
+EPOCHS = 60
 
 # how many samples to process at once during training
 BATCH_SIZE = 32
