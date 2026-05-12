@@ -93,17 +93,13 @@ def dispatch_action(user: str, gesture: str, action: str):
 
     if action == "play_pause":
         def smart_play_pause():
-            # only talk to Spotify if it is already open
             if spotify_running():
-                # ask Spotify what its current state is, playing or paused
-                result = os.popen("osascript -e 'tell application \"Spotify\" to player state as string'").read().strip()
-                if result == "playing":
-                    # send Apple Event directly to Spotify to toggle play pause, no focus needed
-                    os.system("osascript -e 'tell application \"Spotify\" to playpause'")
-                    print("         Spotify Play/Pause")
-                    # stop here, no need to touch Chrome
-                    return
-            # if Spotify is not open or not playing, fall through to YouTube
+                # toggle Spotify directly regardless of playing or paused state
+                os.system("osascript -e 'tell application \"Spotify\" to playpause'")
+                print("         Spotify Play/Pause")
+                # stop here, no need to touch Chrome
+                return
+            # if Spotify is not open fall through to YouTube
             if chrome_running():
                 # bring Chrome to front briefly so it can receive the keyboard shortcut
                 os.system("osascript -e 'tell application \"Google Chrome\" to activate'")
@@ -188,7 +184,7 @@ def dispatch_action(user: str, gesture: str, action: str):
                 os.system("osascript -e 'set volume output volume (output volume of (get volume settings) - 10)'")
                 print("         System Volume DOWN")
         threading.Thread(target=ramp_down, daemon=True).start()
-
+        
 # ── TRANSFORMER MODEL ─────────────────────────────────────────────────────────
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=30, dropout=0.1):
