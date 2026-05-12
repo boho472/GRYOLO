@@ -12,13 +12,15 @@ import time
 GESTURES = ["wave", "fist", "point", "thumbs_up", "open_palm"]
 
 # how many recordings per gesture, needs to be 300 for Transformer to train well
-SAMPLES_PER_GESTURE = 100
+SAMPLES_PER_GESTURE = 200
 
 # how many frames per recording, 30 frames is roughly 1 second of motion
 FRAMES_PER_SAMPLE = 30
 
 # folder where all gesture data files will be saved
 SAVE_DIR = "gesture_data"
+AUTO_INTERVAL = 0.15  # ← seconds between auto-captures
+PERSON = "Adi"       # ← change per person
 
 os.makedirs(SAVE_DIR, exist_ok=True)
 
@@ -41,16 +43,13 @@ def extract_landmarks(hand_landmarks):
     return np.array(coords)
 
 def collect_gesture(gesture_name):
-    # collects 300 samples for one gesture
-    # each sample is 30 frames recorded when you press space
     print(f"\n{'='*50}")
     print(f"  Gesture: {gesture_name.upper()}")
     print(f"  Need: {SAMPLES_PER_GESTURE} samples x {FRAMES_PER_SAMPLE} frames each")
     print(f"{'='*50}")
-    print("Press SPACE to record each sample. Press Q to quit.\n")
+    print("Press SPACE to start auto-capture. Press Q to quit.\n")
 
-    # if we already collected some samples before, resume from where we left off
-    save_path = os.path.join(SAVE_DIR, f"{gesture_name}.npy")
+    save_path = os.path.join(SAVE_DIR, f"{PERSON}_{gesture_name}.npy")
     if os.path.exists(save_path):
         existing = np.load(save_path)
         all_samples = list(existing)
@@ -58,84 +57,91 @@ def collect_gesture(gesture_name):
     else:
         all_samples = []
 
-    cap = cv2.VideoCapture(1)
+    cap = cv2.VideoCapture(0)
     sample_count = len(all_samples)
+    started = False
+    last_capture_time = 0
 
     while sample_count < SAMPLES_PER_GESTURE:
         ret, frame = cap.read()
         if not ret:
             break
 
-        # flip frame so it feels like a mirror
         frame = cv2.flip(frame, 1)
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         result = hands.process(rgb)
 
-        # draw hand landmarks on screen so user can see detection
         if result.multi_hand_landmarks:
             for hand_lm in result.multi_hand_landmarks:
                 mp_draw.draw_landmarks(frame, hand_lm, mp_hands.HAND_CONNECTIONS)
 
-        # show current gesture name and progress on screen
         cv2.putText(frame, f"Gesture: {gesture_name}", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
         cv2.putText(frame, f"Samples: {sample_count}/{SAMPLES_PER_GESTURE}", (10, 65),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        cv2.putText(frame, "SPACE = record | Q = quit", (10, 100),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
+
+        if not started:
+            cv2.putText(frame, "Press SPACE to start auto-capture", (10, 100),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
+        else:
+            now = time.time()
+            remaining = max(0, AUTO_INTERVAL - (now - last_capture_time))
+            cv2.putText(frame, f"Auto-capturing... next in {remaining:.1f}s | Q to quit",
+                        (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 200, 255), 2)
 
         cv2.imshow("Gesture Collection", frame)
         key = cv2.waitKey(1) & 0xFF
 
         if key == ord('q'):
             break
-
         if key == ord(' '):
-            # when space is pressed, record 30 frames of the gesture
-            sequence = []
-            success = True
+            started = True
+            last_capture_time = time.time()
+            print("▶ Auto-capture started!")
 
-            for frame_num in range(FRAMES_PER_SAMPLE):
-                ret, frame = cap.read()
-                if not ret:
-                    success = False
-                    break
+        # ── Auto-capture logic ─────────────────────────────────────────────
+        if started and result.multi_hand_landmarks:
+            now = time.time()
+            if now - last_capture_time >= AUTO_INTERVAL:
+                sequence = []
+                success = True
 
-                frame = cv2.flip(frame, 1)
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                result = hands.process(rgb)
+                for frame_num in range(FRAMES_PER_SAMPLE):
+                    ret, frame = cap.read()
+                    if not ret:
+                        success = False
+                        break
 
-                if result.multi_hand_landmarks:
-                    # extract the 42 landmark coordinates for this frame
-                    landmarks = extract_landmarks(result.multi_hand_landmarks[0])
-                    sequence.append(landmarks)
-                    for hand_lm in result.multi_hand_landmarks:
-                        mp_draw.draw_landmarks(frame, hand_lm, mp_hands.HAND_CONNECTIONS)
-                else:
-                    # if no hand detected in this frame, fill with zeros
-                    sequence.append(np.zeros(42))
+                    frame = cv2.flip(frame, 1)
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    result = hands.process(rgb)
 
-                # show recording status on screen
-                cv2.putText(frame, f"RECORDING... {frame_num+1}/{FRAMES_PER_SAMPLE}",
-                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-                cv2.imshow("Gesture Collection", frame)
-                cv2.waitKey(1)
+                    if result.multi_hand_landmarks:
+                        landmarks = extract_landmarks(result.multi_hand_landmarks[0])
+                        sequence.append(landmarks)
+                        for hand_lm in result.multi_hand_landmarks:
+                            mp_draw.draw_landmarks(frame, hand_lm, mp_hands.HAND_CONNECTIONS)
+                    else:
+                        sequence.append(np.zeros(42))
 
-            # only save the sample if all 30 frames were recorded successfully
-            if success and len(sequence) == FRAMES_PER_SAMPLE:
-                all_samples.append(np.array(sequence))
-                sample_count += 1
-                print(f"  Sample {sample_count}/{SAMPLES_PER_GESTURE} saved")
+                    cv2.putText(frame, f"RECORDING... {frame_num+1}/{FRAMES_PER_SAMPLE}",
+                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                    cv2.imshow("Gesture Collection", frame)
+                    cv2.waitKey(1)
 
-                # save progress to disk every 10 samples so we dont lose data
-                if sample_count % 10 == 0:
-                    np.save(save_path, np.array(all_samples))
-                    print(f"  Progress saved ({sample_count} samples)")
+                if success and len(sequence) == FRAMES_PER_SAMPLE:
+                    all_samples.append(np.array(sequence))
+                    sample_count += 1
+                    last_capture_time = time.time()
+                    print(f"  Sample {sample_count}/{SAMPLES_PER_GESTURE} saved")
+
+                    if sample_count % 10 == 0:
+                        np.save(save_path, np.array(all_samples))
+                        print(f"  Progress saved ({sample_count} samples)")
 
     cap.release()
     cv2.destroyAllWindows()
 
-    # save all collected samples to a npy file when done
     if all_samples:
         data = np.array(all_samples)
         np.save(save_path, data)
