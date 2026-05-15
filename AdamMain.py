@@ -89,29 +89,21 @@ USER_PROFILES = {
     },
 }
 
-# ── IoT ACTION DISPATCHER (Windows) ──────────────────────────────────────────
+# ── ACTION → WINDOWS KEY MAPPING ─────────────────────────────────────────────
+ACTION_KEYS = {
+    "play_pause":  VK_MEDIA_PLAY_PAUSE,
+    "next_track":  VK_MEDIA_NEXT_TRACK,
+    "prev_track":  VK_MEDIA_PREV_TRACK,
+    "volume_up":   VK_VOLUME_UP,
+    "volume_down": VK_VOLUME_DOWN,
+}
+
 def dispatch_action(user: str, gesture: str, action: str):
     timestamp = time.strftime("%H:%M:%S")
     print(f"[{timestamp}] {user} → {gesture} → ACTION: {action.upper()}")
-
-    def send():
-        if action == "play_pause":
-            press_media_key(VK_MEDIA_PLAY_PAUSE)
-            print("         Play/Pause")
-        elif action == "next_track":
-            press_media_key(VK_MEDIA_NEXT_TRACK)
-            print("         Next Track")
-        elif action == "prev_track":
-            press_media_key(VK_MEDIA_PREV_TRACK)
-            print("         Previous Track")
-        elif action == "volume_up":
-            press_media_key(VK_VOLUME_UP)
-            print("         Volume UP")
-        elif action == "volume_down":
-            press_media_key(VK_VOLUME_DOWN)
-            print("         Volume DOWN")
-
-    threading.Thread(target=send, daemon=True).start()
+    vk = ACTION_KEYS.get(action)
+    if vk:
+        threading.Thread(target=press_media_key, args=(vk,), daemon=True).start()
 
 # ── TRANSFORMER MODEL ─────────────────────────────────────────────────────────
 class PositionalEncoding(nn.Module):
